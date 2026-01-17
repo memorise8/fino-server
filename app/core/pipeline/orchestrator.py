@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Awaitable, Callable, Iterable, List, Sequence
 
 from app.config.settings import settings
@@ -12,6 +13,8 @@ from app.core.routing.agent_selector import AgentSelector, SelectedAgent
 from app.core.routing.router import Router
 from app.core.state import ConversationState
 from app.core.types import AgentResponse, FinalResponse, IntentResult, RouteResult
+
+logger = logging.getLogger(__name__)
 
 
 class BackboneOrchestrator:
@@ -33,11 +36,15 @@ class BackboneOrchestrator:
         self._env = settings.env
 
     async def run(self, message: str, agent_names: Sequence[str] | None = None) -> FinalResponse:
+        logger.info("Orchestration start")
         intent = await self._intent_analyzer(message)
         route = await self._router.route(intent)
         selections = self._select_agents(message, intent, agent_names)
+        logger.info("Selected agents=%s", [selection.name for selection in selections])
         responses = await self._call_agents(message, intent, route, selections)
-        return self._integrator.integrate(responses)
+        final_response = self._integrator.integrate(responses)
+        logger.info("Orchestration end")
+        return final_response
 
     def _select_agents(
         self,
@@ -90,8 +97,12 @@ class BackboneOrchestrator:
     ) -> Iterable[AgentResponse]:
         responses: List[AgentResponse] = []
         for selection in selections:
-            response = await selection.agent.run(message, intent, route)
-            payload = dict(response.data)
-            payload.setdefault("agent_name", selection.name)
-            responses.append(AgentResponse(data=payload))
+            try:
+                response = await selection.agent.run(message, intent, route)
+                payload = dict(response.data)
+                payload.setdefault("agent_name", selection.name)
+                responses.append(AgentResponse(data=payload))
+            except Exception:
+                logger.exception("Agent execution failure agent=%s", selection.name)
+                raise
         return responses

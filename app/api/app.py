@@ -26,8 +26,16 @@ from app.core.retrieval.reranker import ScoreReranker
 from app.core.retrieval.vector_retriever import VectorRetriever
 from app.core.routing.agent_selector import AgentSelector
 from app.core.routing.deterministic_router import DeterministicRouter
+from app.logging.logger import setup_logging
+from app.logging.middleware import RequestIdMiddleware
 
 app = FastAPI(title="FINO AI Assistant")
+app.add_middleware(RequestIdMiddleware)
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    setup_logging()
 
 
 class ChatRequest(BaseModel):

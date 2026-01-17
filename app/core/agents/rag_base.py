@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import List
 
+from app.config.llm import LLM_CONFIG
 from app.config.rag import RAG_CONFIG
 from app.core.agents.base import Agent, AgentOutput
 from app.core.evidence import Evidence
@@ -11,6 +13,8 @@ from app.core.llm.llm_client import LLMClient
 from app.core.rag.rag_pipeline import RAGPipeline, RAGResult
 from app.core.state import ConversationState
 from app.core.types import AgentResponse, IntentResult, RouteResult
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRAGAgent(Agent):
@@ -45,27 +49,41 @@ class BaseRAGAgent(Agent):
         )
 
     async def execute(self, message: str, intent: IntentResult, route: RouteResult) -> AgentOutput:
-        state = ConversationState(
-            original_query=message,
-            selected_agent=self._agent_name,
-        )
-        rag_result = self._rag_pipeline.run(message, state)
-        if not rag_result.evidences:
-            return AgentOutput(
-                answer="근거 부족으로 답변 불가",
-                evidences=[],
-                confidence=0.0,
+        logger.info("Agent execution start agent=%s", self._agent_name)
+        try:
+            state = ConversationState(
+                original_query=message,
+                selected_agent=self._agent_name,
             )
-        prompt = self._build_prompt(message, rag_result)
-        answer = (await self._llm.generate(prompt)).strip()
-        if not answer:
-            answer = self._fallback_answer(rag_result)
-        answer = self._apply_policies(answer, rag_result.evidences, rag_result.confidence)
-        return AgentOutput(
-            answer=answer,
-            evidences=rag_result.evidences,
-            confidence=rag_result.confidence,
-        )
+            rag_result = self._rag_pipeline.run(message, state)
+            if not rag_result.evidences:
+                logger.warning("Agent fallback no evidence agent=%s", self._agent_name)
+                return AgentOutput(
+                    answer="근거 부족으로 답변 불가",
+                    evidences=[],
+                    confidence=0.0,
+                )
+            prompt = self._build_prompt(message, rag_result)
+            model_name = str(LLM_CONFIG.get("model", "unknown"))
+            logger.info("LLM call agent=%s model=%s", self._agent_name, model_name)
+            answer = (await self._llm.generate(prompt)).strip()
+            if not answer:
+                logger.warning("Agent fallback empty LLM response agent=%s", self._agent_name)
+                answer = self._fallback_answer(rag_result)
+            answer = self._apply_policies(answer, rag_result.evidences, rag_result.confidence)
+            logger.info(
+                "Agent execution end agent=%s confidence=%.3f",
+                self._agent_name,
+                rag_result.confidence,
+            )
+            return AgentOutput(
+                answer=answer,
+                evidences=rag_result.evidences,
+                confidence=rag_result.confidence,
+            )
+        except Exception:
+            logger.exception("Agent execution failure agent=%s", self._agent_name)
+            raise
 
     def _build_prompt(self, query: str, rag_result: RAGResult) -> str:
         lines = [
@@ -107,6 +125,11 @@ class BaseRAGAgent(Agent):
         if self._has_conflict(evidences):
             answer = f"{answer}\n\n{self._conflict_message()}"
         if confidence < self._low_confidence_threshold:
+            logger.warning(
+                "Low confidence agent=%s confidence=%.3f",
+                self._agent_name,
+                confidence,
+            )
             answer = f"{answer}\n\n{self._low_confidence_message()}"
         return answer
 

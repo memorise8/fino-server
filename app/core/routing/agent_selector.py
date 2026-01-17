@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Dict, List, Sequence
 
 from app.config.agents import AGENT_MAP
@@ -10,6 +11,8 @@ from app.core.agents.base import Agent
 from app.core.agents.registry import AgentRegistry
 from app.core.intent.intent_types import IntentResult
 from app.core.state import ConversationState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,7 @@ class AgentSelector:
         intent_key = self._normalize_intent(state.intent_result)
         names = list(self._mapping.get(intent_key, self._mapping[self._fallback_intent]))
         resolved_names = [self._resolve_agent_name(name) for name in names]
+        logger.info("Agent selection intent=%s agents=%s", intent_key, resolved_names)
         return [SelectedAgent(name=name, agent=self._registry.get(name)) for name in resolved_names]
 
     def schedule(self, state: ConversationState) -> List[SelectedAgent]:
