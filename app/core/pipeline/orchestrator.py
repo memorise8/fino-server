@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable, Iterable, List, Sequence
 
+from app.config.settings import settings
 from app.core.agents.registry import AgentRegistry
 from app.core.integrator import Integrator
 from app.core.intent.intent_types import IntentResult as StructuredIntentResult
@@ -29,6 +30,7 @@ class BackboneOrchestrator:
         self._agents = agents
         self._integrator = integrator
         self._agent_selector = agent_selector
+        self._env = settings.env
 
     async def run(self, message: str, agent_names: Sequence[str] | None = None) -> FinalResponse:
         intent = await self._intent_analyzer(message)

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 from typing import Awaitable, Callable, Sequence
 
+from app.config.settings import settings
 from app.core.pipeline.orchestrator import BackboneOrchestrator
 
-BACKBONE_ENABLED = os.getenv("BACKBONE_ENABLED", "false").lower() == "true"
+BACKBONE_ENABLED = settings.backbone_enabled
 
 
 async def chat(

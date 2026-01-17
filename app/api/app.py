@@ -7,6 +7,9 @@ from typing import Dict, List
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.config.agents import AGENT_MAP
+from app.config.llm import LLM_CONFIG
+from app.config.rag import RAG_CONFIG
 from app.core.agents.accounting_agent import AccountingAgent
 from app.core.agents.general_agent import GeneralAgent
 from app.core.agents.registry import AgentRegistry
@@ -95,12 +98,13 @@ def _build_rag_pipeline(documents: List[RetrievalDocument]) -> RAGPipeline:
     keyword_retriever = KeywordRetriever(documents)
     hybrid_retriever = HybridRetriever(vector_retriever, keyword_retriever, vector_weight=0.6, keyword_weight=0.4)
     reranker = ScoreReranker()
-    return RAGPipeline(retriever=hybrid_retriever, reranker=reranker, top_k=3)
+    top_k = int(RAG_CONFIG["top_k"])
+    return RAGPipeline(retriever=hybrid_retriever, reranker=reranker, top_k=top_k)
 
 
 def _build_orchestrator() -> BackboneOrchestrator:
     documents = _build_documents()
-    llm_client = StubLLMClient()
+    llm_client = StubLLMClient(name=str(LLM_CONFIG["model"]))
     registry = AgentRegistry()
     registry.register("tax", TaxAgent(_build_rag_pipeline(documents["tax"]), llm_client))
     registry.register(
@@ -108,7 +112,7 @@ def _build_orchestrator() -> BackboneOrchestrator:
         AccountingAgent(_build_rag_pipeline(documents["accounting"]), llm_client),
     )
     registry.register("general", GeneralAgent(_build_rag_pipeline(documents["general"]), llm_client))
-    selector = AgentSelector(registry)
+    selector = AgentSelector(registry, mapping=AGENT_MAP)
     intent_analyzer = DeterministicIntentAnalyzer()
     router = DeterministicRouter()
     integrator = Integrator()

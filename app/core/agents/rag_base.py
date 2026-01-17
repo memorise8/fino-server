@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import List
 
+from app.config.rag import RAG_CONFIG
 from app.core.agents.base import Agent, AgentOutput
 from app.core.evidence import Evidence
 from app.core.llm.llm_client import LLMClient
@@ -22,7 +23,7 @@ class BaseRAGAgent(Agent):
         *,
         agent_name: str,
         domain_label: str = "세무/회계",
-        low_confidence_threshold: float = 0.45,
+        low_confidence_threshold: float = RAG_CONFIG["score_threshold"],
     ) -> None:
         self._rag_pipeline = rag_pipeline
         self._llm = llm_client
