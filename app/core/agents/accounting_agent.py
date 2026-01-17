@@ -1,4 +1,4 @@
-"""Tax-domain RAG agent for FINO."""
+"""Accounting-domain RAG agent for FINO."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from app.core.llm.llm_client import LLMClient
 from app.core.rag.rag_pipeline import RAGPipeline
 
 
-class TaxAgent(BaseRAGAgent):
-    """Agent specializing in Korean tax guidance using evidence-only RAG."""
+class AccountingAgent(BaseRAGAgent):
+    """Agent specializing in Korean accounting guidance using evidence-only RAG."""
 
     def __init__(self, rag_pipeline: RAGPipeline, llm_client: LLMClient) -> None:
         super().__init__(
             rag_pipeline,
             llm_client,
-            agent_name="tax",
-            domain_label="세무",
+            agent_name="accounting",
+            domain_label="회계",
         )
