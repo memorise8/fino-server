@@ -8,6 +8,7 @@ from typing import List
 from app.config.llm import LLM_CONFIG
 from app.config.rag import RAG_CONFIG
 from app.core.agents.base import Agent, AgentOutput
+from app.core.dsl.types import LawScope, Priority
 from app.core.evidence import Evidence
 from app.core.llm.llm_client import LLMClient
 from app.core.rag.rag_pipeline import RAGPipeline, RAGResult
@@ -51,11 +52,23 @@ class BaseRAGAgent(Agent):
     async def execute(self, message: str, intent: IntentResult, route: RouteResult) -> AgentOutput:
         logger.info("Agent execution start agent=%s", self._agent_name)
         try:
+            law_scope = self._extract_law_scope(intent)
+            out_of_scope = self._extract_out_of_scope(intent, law_scope)
             state = ConversationState(
                 original_query=message,
                 selected_agent=self._agent_name,
+                law_scope=law_scope,
+                out_of_scope=out_of_scope,
             )
+            if law_scope is None:
+                logger.info("Agent scope empty agent=%s", self._agent_name)
+                return AgentOutput(
+                    answer=self._general_out_of_scope_answer(),
+                    evidences=[],
+                    confidence=0.0,
+                )
             rag_result = self._rag_pipeline.run(message, state)
+            rag_result = self._filter_by_scope(rag_result, law_scope)
             if not rag_result.evidences:
                 logger.warning("Agent fallback no evidence agent=%s", self._agent_name)
                 return AgentOutput(
@@ -63,7 +76,7 @@ class BaseRAGAgent(Agent):
                     evidences=[],
                     confidence=0.0,
                 )
-            prompt = self._build_prompt(message, rag_result)
+            prompt = self._build_prompt(message, rag_result, law_scope)
             model_name = str(LLM_CONFIG.get("model", "unknown"))
             logger.info("LLM call agent=%s model=%s", self._agent_name, model_name)
             answer = (await self._llm.generate(prompt)).strip()
@@ -85,7 +98,7 @@ class BaseRAGAgent(Agent):
             logger.exception("Agent execution failure agent=%s", self._agent_name)
             raise
 
-    def _build_prompt(self, query: str, rag_result: RAGResult) -> str:
+    def _build_prompt(self, query: str, rag_result: RAGResult, law_scope: LawScope) -> str:
         lines = [
             f"당신은 FINO {self._domain_label} 에이전트입니다.",
             "아래 근거만 사용해 답변하세요. 근거에 없는 내용은 답하지 마세요.",
@@ -93,8 +106,16 @@ class BaseRAGAgent(Agent):
             "[질의]",
             query,
             "",
-            "[근거]",
+            "[법령 범위]",
         ]
+        for code in law_scope.law_codes:
+            lines.append(f"- {code}")
+        lines.extend(
+            [
+                "",
+                "[근거]",
+            ]
+        )
         for evidence, chunk in zip(rag_result.evidences, rag_result.chunks):
             lines.append(f"- {self._format_citation(evidence)}: {chunk}")
         lines.extend(
@@ -118,6 +139,22 @@ class BaseRAGAgent(Agent):
         for evidence in evidences:
             lines.append(f"- {self._format_citation(evidence)}")
         return "\n".join(lines)
+
+    def _filter_by_scope(self, rag_result: RAGResult, law_scope: LawScope) -> RAGResult:
+        allowed = set(law_scope.law_codes)
+        filtered = [
+            (evidence, chunk)
+            for evidence, chunk in zip(rag_result.evidences, rag_result.chunks)
+            if evidence.law_code in allowed
+        ]
+        if not filtered:
+            return RAGResult(evidences=[], chunks=[], confidence=0.0)
+        evidences, chunks = zip(*filtered)
+        return RAGResult(
+            evidences=list(evidences),
+            chunks=list(chunks),
+            confidence=rag_result.confidence,
+        )
 
     def _apply_policies(
         self, answer: str, evidences: List[Evidence], confidence: float
@@ -152,3 +189,45 @@ class BaseRAGAgent(Agent):
     @staticmethod
     def _low_confidence_message() -> str:
         return "신뢰도가 낮아 참고용으로만 활용해 주세요."
+
+    @staticmethod
+    def _extract_law_scope(intent: IntentResult) -> LawScope | None:
+        if not isinstance(intent.data, dict):
+            return None
+        law_scope = intent.data.get("law_scope")
+        if isinstance(law_scope, LawScope):
+            return law_scope
+        if isinstance(law_scope, dict):
+            intent_value = str(law_scope.get("intent", "")).strip()
+            law_codes_value = law_scope.get("law_codes")
+            priority_value = law_scope.get("priority")
+            if not intent_value or not isinstance(law_codes_value, list) or priority_value is None:
+                return None
+            try:
+                priority = (
+                    priority_value
+                    if isinstance(priority_value, Priority)
+                    else Priority.from_value(str(priority_value))
+                )
+            except ValueError:
+                return None
+            law_codes = [str(code).strip() for code in law_codes_value if str(code).strip()]
+            if not law_codes:
+                return None
+            return LawScope(intent=intent_value, law_codes=law_codes, priority=priority)
+        return None
+
+    @staticmethod
+    def _extract_out_of_scope(intent: IntentResult, law_scope: LawScope | None) -> bool:
+        if not isinstance(intent.data, dict):
+            return law_scope is None
+        out_of_scope = intent.data.get("out_of_scope")
+        if isinstance(out_of_scope, bool):
+            return out_of_scope
+        return law_scope is None
+
+    def _general_out_of_scope_answer(self) -> str:
+        return (
+            "요청하신 내용에 해당하는 법령 범위를 확인할 수 없어 일반적인 안내만 제공합니다. "
+            "구체적인 법령 적용은 전문가 확인이 필요합니다."
+        )

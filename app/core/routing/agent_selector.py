@@ -39,6 +39,11 @@ class AgentSelector:
     def select(self, state: ConversationState) -> List[SelectedAgent]:
         """Return agents in execution order for a conversation state."""
 
+        if state.law_scope is None or state.out_of_scope:
+            names = list(self._mapping.get("etc", ["general"]))
+            resolved_names = [self._resolve_agent_name(name) for name in names]
+            logger.info("Agent selection out_of_scope agents=%s", resolved_names)
+            return [SelectedAgent(name=name, agent=self._registry.get(name)) for name in resolved_names]
         intent_key = self._normalize_intent(state.intent_result)
         names = list(self._mapping.get(intent_key, self._mapping[self._fallback_intent]))
         resolved_names = [self._resolve_agent_name(name) for name in names]
